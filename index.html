@@ -91,22 +91,20 @@
         const TANK_SPEED = 15;
         const TANK_TURN_SPEED = 2;
         const GRAVITY = -25;
-        const GROUND_FRICTION = 0.95;
+        const GROUND_FRICTION = 1.0;         // No friction - infinite speed!
         const AIR_FRICTION = 1.0;            // No speed loss in air
         const GLITCH_LAUNCH_FORCE = 50; // How high the tank flies
         const SHAKE_DURATION = 1.5; // Seconds of shaking before launch
 
         // Bunnyhopping constants
         const BHOP_JUMP_FORCE = 12;         // Base jump velocity
-        const BHOP_SPEED_BOOST = 3;         // Speed added per successful bhop
-        const BHOP_MAX_SPEED = 60;          // Maximum bhop speed cap
-        const BHOP_DECAY = 0.97;            // Speed decay when not bhopping
+        const BHOP_SPEED_BOOST = 5;         // Speed added per successful bhop
         const AIR_CONTROL = 0.5;            // Air strafe/turn multiplier (0-1)
 
         // Scene Setup
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87ceeb);
-        scene.fog = new THREE.Fog(0x87ceeb, 50, 200);
+        scene.fog = new THREE.Fog(0x87ceeb, 100, 500); // Extended for high speed visibility
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -547,11 +545,11 @@
                 // Check if this is a successful bhop (had horizontal momentum)
                 const horizontalSpeed = Math.sqrt(state.velocity.x ** 2 + state.velocity.z ** 2);
                 if (horizontalSpeed > 5) {
-                    // Successful bhop - add speed boost!
+                    // Successful bhop - add speed boost! NO CAP - INFINITE SPEED!
                     state.bhopChain++;
-                    state.bhopSpeed = Math.min(state.bhopSpeed + BHOP_SPEED_BOOST, BHOP_MAX_SPEED - TANK_SPEED);
+                    state.bhopSpeed += BHOP_SPEED_BOOST;
 
-                    // Add a little forward boost in movement direction
+                    // Add forward boost in movement direction
                     const boostDir = new THREE.Vector3(state.velocity.x, 0, state.velocity.z).normalize();
                     state.velocity.x += boostDir.x * BHOP_SPEED_BOOST;
                     state.velocity.z += boostDir.z * BHOP_SPEED_BOOST;
@@ -601,36 +599,12 @@
                     // Landing impact
                     state.velocity.y = 0;
                     state.angularVelocity = 0;
-
-                    // BHOP MECHANIC: If jump is queued (holding space), bypass landing friction!
-                    if (state.jumpQueued) {
-                        // Perfect bhop - preserve momentum (the 1-frame friction bypass)
-                        // Only apply minimal friction
-                        state.velocity.x *= 0.98;
-                        state.velocity.z *= 0.98;
-                    } else {
-                        // Normal landing - lose speed and reset bhop chain
-                        state.velocity.multiplyScalar(0.3);
-                        state.bhopSpeed *= 0.5; // Lose half bhop speed on failed landing
-                        state.bhopChain = 0;
-                    }
+                    // NO friction on landing - keep ALL momentum!
                 }
                 state.onGround = true;
             }
 
-            // Decay bhop speed when on ground and not jumping
-            if (state.onGround && !state.keys[' ']) {
-                state.bhopSpeed *= BHOP_DECAY;
-                if (state.bhopSpeed < 0.5) state.bhopSpeed = 0;
-            }
-
-            // Apply friction (reduced during bhop chain)
-            let friction = state.onGround ? GROUND_FRICTION : AIR_FRICTION;
-            if (state.bhopChain > 0 && state.onGround) {
-                friction = 0.99; // Much less friction during active bhop
-            }
-            state.velocity.x *= friction;
-            state.velocity.z *= friction;
+            // NO friction, NO decay - INFINITE SPEED!
 
             // Apply shaking effect
             applyShaking(deltaTime);
