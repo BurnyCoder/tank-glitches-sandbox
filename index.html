@@ -44,13 +44,14 @@
     <div id="ui">
         <h2>FLYING TANK GLITCH</h2>
         <p class="controls">WASD - Move tank</p>
-        <p class="controls">SPACE - Brake</p>
+        <p class="controls">SPACE - Jump (hold for bhop!)</p>
         <p class="controls">R - Reset position</p>
         <p class="tip">Drive into the RED ZONES to trigger the flying glitch!</p>
     </div>
     <div id="status">
         <div>Height: <span id="height">0.0</span>m</div>
         <div>Speed: <span id="speed">0.0</span> km/h</div>
+        <div>Bhop Chain: <span id="bhopChain">0</span></div>
         <div id="flyingStatus"></div>
     </div>
 
@@ -78,7 +79,12 @@
             shakeIntensity: 0,
             launchPending: false,
             launchTimer: 0,
-            glitchZones: []
+            glitchZones: [],
+            // Bunnyhopping state
+            bhopSpeed: 0,           // Accumulated bhop speed bonus
+            bhopChain: 0,           // Consecutive bhop count
+            wasOnGround: true,      // For detecting landing frame
+            jumpQueued: false       // For held spacebar auto-jump
         };
 
         // Constants - Based on WoT glitch behavior
@@ -86,9 +92,15 @@
         const TANK_TURN_SPEED = 2;
         const GRAVITY = -25;
         const GROUND_FRICTION = 0.95;
-        const AIR_FRICTION = 0.99;
+        const AIR_FRICTION = 1.0;            // No speed loss in air
         const GLITCH_LAUNCH_FORCE = 50; // How high the tank flies
         const SHAKE_DURATION = 1.5; // Seconds of shaking before launch
+
+        // Bunnyhopping constants
+        const BHOP_JUMP_FORCE = 12;         // Base jump velocity
+        const BHOP_SPEED_BOOST = 3;         // Speed added per successful bhop
+        const BHOP_MAX_SPEED = 60;          // Maximum bhop speed cap
+        const BHOP_DECAY = 0.97;            // Speed decay when not bhopping
 
         // Scene Setup
         const scene = new THREE.Scene();
@@ -319,6 +331,7 @@
         const heightDisplay = document.getElementById('height');
         const speedDisplay = document.getElementById('speed');
         const flyingStatusDisplay = document.getElementById('flyingStatus');
+        const bhopChainDisplay = document.getElementById('bhopChain');
 
         // Check if tank is in a glitch zone
         function checkGlitchZones() {
@@ -383,6 +396,10 @@
             state.isShaking = false;
             state.launchPending = false;
             state.launchTimer = 0;
+            // Reset bhop state
+            state.bhopSpeed = 0;
+            state.bhopChain = 0;
+            state.jumpQueued = false;
         }
 
         // Game loop
@@ -401,17 +418,49 @@
                 if (state.keys['a']) state.tank.rotation.y += TANK_TURN_SPEED * deltaTime;
                 if (state.keys['d']) state.tank.rotation.y -= TANK_TURN_SPEED * deltaTime;
 
+                // Calculate base movement speed + bhop bonus
+                const totalSpeed = TANK_SPEED + state.bhopSpeed;
+
                 if (moveDir.length() > 0) {
                     moveDir.applyQuaternion(state.tank.quaternion);
-                    moveDir.normalize().multiplyScalar(TANK_SPEED);
+                    moveDir.normalize().multiplyScalar(totalSpeed);
                     state.velocity.x = moveDir.x;
                     state.velocity.z = moveDir.z;
                 }
 
-                // Brake
+                // Bunnyhopping - Jump when spacebar is pressed/held
                 if (state.keys[' ']) {
-                    state.velocity.multiplyScalar(0.9);
+                    state.jumpQueued = true;
                 }
+            }
+
+            // Process queued jump (works for both tap and hold)
+            if (state.jumpQueued && state.onGround && !state.launchPending) {
+                // Execute bhop jump
+                state.velocity.y = BHOP_JUMP_FORCE;
+                state.onGround = false;
+                state.jumpQueued = false;
+
+                // Check if this is a successful bhop (had horizontal momentum)
+                const horizontalSpeed = Math.sqrt(state.velocity.x ** 2 + state.velocity.z ** 2);
+                if (horizontalSpeed > 5) {
+                    // Successful bhop - add speed boost!
+                    state.bhopChain++;
+                    state.bhopSpeed = Math.min(state.bhopSpeed + BHOP_SPEED_BOOST, BHOP_MAX_SPEED - TANK_SPEED);
+
+                    // Add a little forward boost in movement direction
+                    const boostDir = new THREE.Vector3(state.velocity.x, 0, state.velocity.z).normalize();
+                    state.velocity.x += boostDir.x * BHOP_SPEED_BOOST;
+                    state.velocity.z += boostDir.z * BHOP_SPEED_BOOST;
+                } else {
+                    // Standing jump - reset chain
+                    state.bhopChain = 0;
+                }
+            }
+
+            // Queue jump if spacebar held while in air (for auto-bhop on landing)
+            if (state.keys[' '] && !state.onGround) {
+                state.jumpQueued = true;
             }
 
             // Check for glitch zones
@@ -448,14 +497,35 @@
                 if (!state.onGround) {
                     // Landing impact
                     state.velocity.y = 0;
-                    state.velocity.multiplyScalar(0.3); // Lose speed on landing
                     state.angularVelocity = 0;
+
+                    // BHOP MECHANIC: If jump is queued (holding space), bypass landing friction!
+                    if (state.jumpQueued) {
+                        // Perfect bhop - preserve momentum (the 1-frame friction bypass)
+                        // Only apply minimal friction
+                        state.velocity.x *= 0.98;
+                        state.velocity.z *= 0.98;
+                    } else {
+                        // Normal landing - lose speed and reset bhop chain
+                        state.velocity.multiplyScalar(0.3);
+                        state.bhopSpeed *= 0.5; // Lose half bhop speed on failed landing
+                        state.bhopChain = 0;
+                    }
                 }
                 state.onGround = true;
             }
 
-            // Apply friction
-            const friction = state.onGround ? GROUND_FRICTION : AIR_FRICTION;
+            // Decay bhop speed when on ground and not jumping
+            if (state.onGround && !state.keys[' ']) {
+                state.bhopSpeed *= BHOP_DECAY;
+                if (state.bhopSpeed < 0.5) state.bhopSpeed = 0;
+            }
+
+            // Apply friction (reduced during bhop chain)
+            let friction = state.onGround ? GROUND_FRICTION : AIR_FRICTION;
+            if (state.bhopChain > 0 && state.onGround) {
+                friction = 0.99; // Much less friction during active bhop
+            }
             state.velocity.x *= friction;
             state.velocity.z *= friction;
 
@@ -486,11 +556,29 @@
             heightDisplay.textContent = Math.max(0, state.tank.position.y - 0.1).toFixed(1);
             const speed = Math.sqrt(state.velocity.x ** 2 + state.velocity.z ** 2) * 3.6;
             speedDisplay.textContent = speed.toFixed(1);
+            bhopChainDisplay.textContent = state.bhopChain;
+
+            // Color bhop chain based on count
+            if (state.bhopChain >= 5) {
+                bhopChainDisplay.style.color = '#e74c3c'; // Red for high chain
+            } else if (state.bhopChain >= 3) {
+                bhopChainDisplay.style.color = '#f39c12'; // Orange for medium
+            } else if (state.bhopChain > 0) {
+                bhopChainDisplay.style.color = '#4ecdc4'; // Cyan for active
+            } else {
+                bhopChainDisplay.style.color = '#fff';
+            }
 
             if (!state.onGround) {
-                flyingStatusDisplay.innerHTML = '<span class="flying">FLYING!</span>';
+                if (state.bhopChain > 0) {
+                    flyingStatusDisplay.innerHTML = `<span style="color: #4ecdc4;">BHOPPING! x${state.bhopChain}</span>`;
+                } else {
+                    flyingStatusDisplay.innerHTML = '<span class="flying">FLYING!</span>';
+                }
             } else if (state.isShaking) {
                 flyingStatusDisplay.innerHTML = '<span style="color: #f39c12;">GLITCH DETECTED!</span>';
+            } else if (state.bhopChain > 0) {
+                flyingStatusDisplay.innerHTML = `<span style="color: #4ecdc4;">BHOP CHAIN: ${state.bhopChain}</span>`;
             } else {
                 flyingStatusDisplay.innerHTML = '';
             }
@@ -506,6 +594,7 @@
 
         console.log('Flying Tank Glitch loaded!');
         console.log('Drive into the RED zones to experience the flying glitch!');
+        console.log('BHOP: Hold SPACE while moving to bunnyhop and gain speed!');
     </script>
 </body>
 </html>
