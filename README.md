@@ -2,6 +2,8 @@
 
 A Three.js browser game featuring a tank with bunnyhopping mechanics and flying glitch zones.
 
+<img width="2554" height="1180" alt="image" src="https://github.com/user-attachments/assets/bcfef900-866c-460d-af6c-880714512788" />
+
 ## Play
 
 Open `index.html` in a browser.
