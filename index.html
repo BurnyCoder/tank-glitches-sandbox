@@ -98,7 +98,8 @@
 
         // Bunnyhopping constants
         const BHOP_JUMP_FORCE = 12;         // Base jump velocity
-        const BHOP_SPEED_BOOST = 5;         // Speed added per successful bhop
+        const BHOP_SPEED_BOOST = 5;         // Base speed added per bhop
+        const BHOP_MULTIPLIER = 1.15;       // Exponential multiplier per bhop
         const AIR_CONTROL = 0.5;            // Air strafe/turn multiplier (0-1)
 
         // Scene Setup
@@ -545,14 +546,17 @@
                 // Check if this is a successful bhop (had horizontal momentum)
                 const horizontalSpeed = Math.sqrt(state.velocity.x ** 2 + state.velocity.z ** 2);
                 if (horizontalSpeed > 5) {
-                    // Successful bhop - add speed boost! NO CAP - INFINITE SPEED!
+                    // Successful bhop - EXPONENTIAL speed boost!
                     state.bhopChain++;
-                    state.bhopSpeed += BHOP_SPEED_BOOST;
 
-                    // Add forward boost in movement direction
+                    // Exponential growth: multiply current speed + add base boost
+                    state.bhopSpeed = (state.bhopSpeed + BHOP_SPEED_BOOST) * BHOP_MULTIPLIER;
+
+                    // Exponential velocity boost in movement direction
                     const boostDir = new THREE.Vector3(state.velocity.x, 0, state.velocity.z).normalize();
-                    state.velocity.x += boostDir.x * BHOP_SPEED_BOOST;
-                    state.velocity.z += boostDir.z * BHOP_SPEED_BOOST;
+                    const expBoost = BHOP_SPEED_BOOST * Math.pow(BHOP_MULTIPLIER, state.bhopChain);
+                    state.velocity.x += boostDir.x * expBoost;
+                    state.velocity.z += boostDir.z * expBoost;
                 } else {
                     // Standing jump - reset chain
                     state.bhopChain = 0;
